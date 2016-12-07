@@ -68,9 +68,7 @@ public class QueryTrace {
         final Identifier what, final long elapsed, final List<QueryTrace> children,
         final long preAggregationSampleSize, final long numSeries
     ) {
-        QueryTrace qt = new QueryTrace(what, elapsed, children, preAggregationSampleSize,
-                                       numSeries);
-        return qt;
+        return new QueryTrace(what, elapsed, children, preAggregationSampleSize, numSeries);
     }
 
     public void formatTrace(PrintWriter out) {

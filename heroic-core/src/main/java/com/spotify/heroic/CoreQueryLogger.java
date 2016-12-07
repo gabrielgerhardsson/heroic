@@ -53,20 +53,20 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 @Data
 public class CoreQueryLogger implements QueryLogger {
-    private static Logger queryAccessLog = LoggerFactory.getLogger("query.access.log");
-    private static Logger queryDoneLog = LoggerFactory.getLogger("query.done.log");
+    private static final Logger queryAccessLog = LoggerFactory.getLogger("query.access.log");
+    private static final Logger queryDoneLog = LoggerFactory.getLogger("query.done.log");
 
-    private OptionalLimit logQueriesThresholdDataPoints;
-    private ObjectMapper objectMapper;
+    private final OptionalLimit logQueriesThresholdDataPoints;
+    private final ObjectMapper objectMapper;
 
-    private static LongAdder totalQueriesProcessed = new LongAdder();
+    private static final LongAdder totalQueriesProcessed = new LongAdder();
 
     // Use AtomicLong since every time we do this we'll also read the value, so LongAdder is no use
-    private static AtomicLong queriesAboveThreshold = new AtomicLong();
+    private static final AtomicLong queriesAboveThreshold = new AtomicLong();
 
     @Inject
-    public CoreQueryLogger(@Named ("logQueriesThresholdDataPoints") final OptionalLimit
-        logQueriesThresholdDataPoints,
+    public CoreQueryLogger(
+        @Named("logQueriesThresholdDataPoints") final OptionalLimit logQueriesThresholdDataPoints,
         @Named(MediaType.APPLICATION_JSON) final ObjectMapper objectMapper) {
         this.logQueriesThresholdDataPoints = logQueriesThresholdDataPoints;
         this.objectMapper = objectMapper;
@@ -117,9 +117,11 @@ public class CoreQueryLogger implements QueryLogger {
     public void logQueryFailed(Query query, Throwable t) {
         logQueryDone(query, null, "failed", t);
     }
+
     public void logQueryResolved(Query query, QueryResult queryResult) {
         logQueryDone(query, queryResult, "resolved", null);
     }
+
     public void logQueryCancelled(Query query) {
         logQueryDone(query, null, "cancelled", null);
     }
@@ -130,8 +132,6 @@ public class CoreQueryLogger implements QueryLogger {
         final QueryOriginContext originContext = query.getOriginContext()
             .orElse(QueryOriginContext.empty());
 
-        log.info("QueryResult:logQueryDone entering");
-
         totalQueriesProcessed.increment();
 
         int postAggregationDataPoints = 0;
@@ -140,7 +140,6 @@ public class CoreQueryLogger implements QueryLogger {
         }
 
         if (!logQueriesThresholdDataPoints.isGreaterOrEqual(postAggregationDataPoints)) {
-            log.info("QueryResult:logQueryDone Won't log because of threshold");
             return;
         }
 
@@ -152,7 +151,7 @@ public class CoreQueryLogger implements QueryLogger {
         dateFormat.setTimeZone(tz);
         String currentTimeAsISO = dateFormat.format(new Date());
 
-        boolean isIPv6 = originContext.getRemoteAddr().indexOf(':') != -1;
+        final boolean isIPv6 = originContext.getRemoteAddr().indexOf(':') != -1;
 
         long postAggregationDataPointsPerS = 0;
         if (trace.getElapsed() != 0) {
@@ -160,7 +159,7 @@ public class CoreQueryLogger implements QueryLogger {
                 (1000000 * postAggregationDataPoints) / trace.getElapsed();
         }
 
-        QueryDoneMessageData message = new QueryDoneMessageData(
+        final QueryDoneMessageData message = new QueryDoneMessageData(
             status,
             (throwable == null ? null : throwable.toString()),
             originContext.getQueryId(),
@@ -179,9 +178,9 @@ public class CoreQueryLogger implements QueryLogger {
             originContext.getQueryString(),
             createQueryDoneChildList(trace.getChildren()));
 
-        QueryDoneData queryDoneData = new QueryDoneData(currentTimeAsISO, message);
+        final QueryDoneData queryDoneData = new QueryDoneData(currentTimeAsISO, message);
 
-        String json;
+        final String json;
         try {
             json = objectMapper.writeValueAsString(queryDoneData);
         } catch (JsonProcessingException e) {
@@ -197,21 +196,21 @@ public class CoreQueryLogger implements QueryLogger {
     @Data
     class QueryAccessData {
         @JsonProperty("@timestamp")
-        private String timestamp;
+        private final String timestamp;
         @JsonProperty("@message")
-        private QueryAccessDataMessage message;
+        private final QueryAccessDataMessage message;
     }
     @AllArgsConstructor
     @Data
     class QueryAccessDataMessage {
-        private UUID uuid;
-        private String fromIP;
-        private String fromHost;
-        private String userAgent;
-        private String clientId;
+        private final UUID uuid;
+        private final String fromIP;
+        private final String fromHost;
+        private final String userAgent;
+        private final String clientId;
         // The query String already contains the original JSON, so tell Jackson to not escape it
         @JsonRawValue
-        private String query;
+        private final String query;
     }
 
 
@@ -219,47 +218,47 @@ public class CoreQueryLogger implements QueryLogger {
     @Data
     class QueryDoneData {
         @JsonProperty("@timestamp")
-        String timestamp;
+        private final String timestamp;
         @JsonProperty("@message")
-        QueryDoneMessageData message;
+        private final QueryDoneMessageData message;
     }
 
     @AllArgsConstructor
     @Data
     class QueryDoneMessageData {
-        String status;
-        String error;
-        UUID uuid;
-        long totalQueries;
-        long numQueriesAboveThreshold;
-        long postAggregationDataPoints;
-        long elapsed;
-        long postAggregationDataPointsPerS;
-        long preAggregationDataPoints;
-        long preAggregationSeries;
-        String fromIP;
-        String fromHost;
-        private String userAgent;
-        private String clientId;
+        private final String status;
+        private final String error;
+        private final UUID uuid;
+        private final long totalQueries;
+        private final long numQueriesAboveThreshold;
+        private final long postAggregationDataPoints;
+        private final long elapsed;
+        private final long postAggregationDataPointsPerS;
+        private final long preAggregationDataPoints;
+        private final long preAggregationSeries;
+        private final String fromIP;
+        private final String fromHost;
+        private final String userAgent;
+        private final String clientId;
         // The query String already contains the original JSON, so tell Jackson to not escape it
         @JsonRawValue
-        private String query;
-        List<QueryDoneChildData> queryTraceChildren;
+        private final String query;
+        private final List<QueryDoneChildData> queryTraceChildren;
     }
 
     @AllArgsConstructor
     @Data
     class QueryDoneChildData {
-        private String traceLevel;
-        private long elapsed;
-        private long preAggregationDataPoints;
-        private long preAggregationSeries;
-        List<QueryDoneChildData> queryTraceChildren;
+        private final String traceLevel;
+        private final long elapsed;
+        private final long preAggregationDataPoints;
+        private final long preAggregationSeries;
+        private final List<QueryDoneChildData> queryTraceChildren;
     }
 
     private List<QueryDoneChildData> createQueryDoneChildList(List<QueryTrace> queryTraces) {
-        List<QueryDoneChildData> list = new ArrayList<>();
-        Iterator<QueryTrace> iterator = queryTraces.iterator();
+        final List<QueryDoneChildData> list = new ArrayList<>();
+        final Iterator<QueryTrace> iterator = queryTraces.iterator();
 
         while (iterator.hasNext()) {
             QueryTrace queryTrace = iterator.next();
@@ -269,13 +268,10 @@ public class CoreQueryLogger implements QueryLogger {
     }
 
     private QueryDoneChildData createQueryDoneChild(QueryTrace queryTrace) {
-        List<QueryDoneChildData> children = createQueryDoneChildList(queryTrace.getChildren());
+        final List<QueryDoneChildData> children = createQueryDoneChildList(queryTrace.getChildren());
 
-        QueryDoneChildData child = new QueryDoneChildData(queryTrace.getWhat().toString(),
+        return new QueryDoneChildData(queryTrace.getWhat().toString(),
             queryTrace.getElapsed(), queryTrace.getPreAggregationSampleSize(),
             queryTrace.getNumSeries(), children);
-
-        return child;
     }
-
 }
