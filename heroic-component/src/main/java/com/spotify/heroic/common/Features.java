@@ -40,6 +40,7 @@ public class Features {
      */
     public static final Features DEFAULT = Features.create(ImmutableSet.<Feature>builder()
         .add(Feature.SHIFT_RANGE)
+        .add(Feature.LOG_QUERIES)
         .build());
 
     private final Set<Feature> features;
