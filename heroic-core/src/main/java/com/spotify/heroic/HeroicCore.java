@@ -312,7 +312,7 @@ public class HeroicCore implements HeroicConfiguration {
      * @return
      */
     private ExecutorService setupExecutor(final int threads) {
-        return new MonitoringThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
             new LinkedBlockingQueue<>(), new ThreadFactoryBuilder()
             .setNameFormat("heroic-core-%d")
             .setUncaughtExceptionHandler(uncaughtExceptionHandler)
