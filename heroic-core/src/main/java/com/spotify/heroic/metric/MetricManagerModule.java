@@ -54,7 +54,7 @@ import static java.util.Optional.of;
 public class MetricManagerModule {
     public static final int DEFAULT_FETCH_PARALLELISM = 100;
     public static final boolean DEFAULT_FAIL_ON_LIMITS = false;
-    public static final long DEFAULT_LOG_QUERIES_THRESHOLD = 1000000;
+    public static final long DEFAULT_LOG_QUERIES_THRESHOLD = 0;
 
     private final List<MetricModule> backends;
     private final Optional<List<String>> defaultBackends;
