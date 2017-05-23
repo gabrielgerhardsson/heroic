@@ -23,9 +23,12 @@ package com.spotify.heroic.statistics.semantic;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
+import com.google.common.base.Stopwatch;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.async.AsyncObservable;
+import com.spotify.heroic.common.DateRange;
 import com.spotify.heroic.common.Groups;
+import com.spotify.heroic.common.Series;
 import com.spotify.heroic.common.Statistics;
 import com.spotify.heroic.metric.BackendEntry;
 import com.spotify.heroic.metric.BackendKey;
@@ -43,9 +46,13 @@ import com.spotify.metrics.core.MetricId;
 import com.spotify.metrics.core.SemanticMetricRegistry;
 import eu.toolchain.async.AsyncFuture;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAccumulator;
 import java.util.function.Consumer;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 
@@ -75,6 +82,8 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
     private final Histogram queryRowsAccessed;
     /* Maximum amount of data points in memory at any time for a query */
     private final Histogram queryMaxLiveSamples;
+    private final Histogram queryReadRate;
+    private final Histogram queryRowDensity;
 
     public SemanticMetricBackendReporter(SemanticMetricRegistry registry) {
         final MetricId base = MetricId.build().tagged("component", COMPONENT);
@@ -108,6 +117,10 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
             base.tagged("what", "query-metrics-rows-accessed", "unit", Units.COUNT));
         queryMaxLiveSamples = registry.histogram(
             base.tagged("what", "query-metrics-max-live-samples", "unit", Units.COUNT));
+        queryReadRate =
+            registry.histogram(base.tagged("what", "query-metrics-read-rate", "unit", Units.COUNT));
+        queryRowDensity = registry.histogram(
+            base.tagged("what", "query-metrics-row-density", "unit", Units.COUNT));
     }
 
     @Override
@@ -122,10 +135,23 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
             private final AtomicLong dataInMemory = new AtomicLong(0L);
             private final LongAccumulator rowsAccessed = new LongAccumulator((x, y) -> x + y, 0L);
             private final LongAccumulator maxDataInMemory = new LongAccumulator(Long::max, 0L);
+            private final Stopwatch queryWatch = Stopwatch.createStarted();
+            private final Map<Integer, ReadRangeStatistics> seriesDensity =
+                new ConcurrentHashMap<>();
 
             @Override
             public void reportRowsAccessed(final long n) {
                 rowsAccessed.accumulate(n);
+            }
+
+            @Override
+            public void reportSliceRead(
+                final Series series, final DateRange range, final long n
+            ) {
+                int key = series.hashCode() + range.hashCode();
+                ReadRangeStatistics stats = seriesDensity.computeIfAbsent(key,
+                    ignore -> new ReadRangeStatistics(range, new AtomicLong(0L)));
+                stats.getValue().addAndGet(n);
             }
 
             @Override
@@ -149,15 +175,33 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
             public void reportOperationEnded() {
                 // Decrement any remaining live memory
                 sampleSizeLive.dec(dataInMemory.get());
+
+                final long dataReadLocal = dataRead.get();
                 /* The accumulated count has previously been incremented with all of the data read,
                  * so decrease the full amount now */
-                sampleSizeAccumulated.dec(dataRead.get());
+                sampleSizeAccumulated.dec(dataReadLocal);
 
-                querySamplesRead.update(dataRead.get());
+                querySamplesRead.update(dataReadLocal);
                 queryRowsAccessed.update(rowsAccessed.get());
                 queryMaxLiveSamples.update(maxDataInMemory.get());
+
+                long duration = queryWatch.elapsed(TimeUnit.NANOSECONDS);
+                if (duration != 0) {
+                    queryReadRate.update((1000_000_000 * dataReadLocal) / duration);
+                }
+
+                for (ReadRangeStatistics stats : seriesDensity.values()) {
+                    long rangeMs = stats.getRange().diff();
+                    queryRowDensity.update((3600_000L * stats.getValue().get()) / rangeMs);
+                }
             }
         };
+    }
+
+    @Data
+    private class ReadRangeStatistics {
+        private final DateRange range;
+        private final AtomicLong value;
     }
 
     @Override

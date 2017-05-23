@@ -270,13 +270,14 @@ public class LocalMetricManager implements MetricManager {
                         if (slicedFetch) {
                             fetches.add(
                                 () -> b.fetch(new FetchData.Request(source, s, range, options),
-                                    watcher, mc -> collector.acceptMetricsCollection(s, mc)));
+                                    watcher,
+                                    mc -> collector.acceptMetricsCollection(s, range, mc)));
                         } else {
                             fetches.add(() -> b
                                 .fetch(new FetchData.Request(source, s, range, options), watcher)
                                 .directTransform(d -> {
                                     d.getGroups().forEach(group -> {
-                                        collector.acceptMetricsCollection(s, group);
+                                        collector.acceptMetricsCollection(s, range, group);
                                     });
                                     return d.getResult();
                                 }));
@@ -440,9 +441,12 @@ public class LocalMetricManager implements MetricManager {
             requestErrors.addAll(result.getErrors());
         }
 
-        void acceptMetricsCollection(final Series series, MetricCollection g) {
+        void acceptMetricsCollection(
+            final Series series, final DateRange range, MetricCollection g
+        ) {
             g.updateAggregation(session, series.getTags(), ImmutableSet.of(series));
             dataInMemoryReporter.reportDataNoLongerNeeded(g.size());
+            dataInMemoryReporter.reportSliceRead(series, range, g.size());
         }
 
         @Override

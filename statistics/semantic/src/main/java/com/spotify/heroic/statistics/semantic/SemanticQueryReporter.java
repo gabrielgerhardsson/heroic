@@ -23,6 +23,7 @@ package com.spotify.heroic.statistics.semantic;
 
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
+import com.spotify.heroic.common.DateRange;
 import com.spotify.heroic.statistics.FutureReporter;
 import com.spotify.heroic.statistics.QueryReporter;
 import com.spotify.metrics.core.MetricId;
@@ -37,6 +38,8 @@ public class SemanticQueryReporter implements QueryReporter {
 
     private final FutureReporter query;
     private final Histogram smallQueryLatency;
+    private final Histogram queryMetricDensity;
+    private final Histogram queryReadRate;
     private final Meter rpcError;
     private final Meter rpcCancellation;
 
@@ -47,6 +50,11 @@ public class SemanticQueryReporter implements QueryReporter {
             new SemanticFutureReporter(registry, base.tagged("what", "query", "unit", Units.QUERY));
         smallQueryLatency = registry.histogram(
             base.tagged("what", "small-query-latency", "unit", Units.MILLISECOND));
+        queryMetricDensity =
+            registry.histogram(base.tagged("what", "query-metric-density", "unit", Units.COUNT));
+        queryReadRate =
+            registry.histogram(base.tagged("what", "query-read-rate", "unit", Units.COUNT));
+
         rpcError = registry.meter(base.tagged("what", "cluster-rpc-error", "unit", Units.FAILURE));
         rpcCancellation =
             registry.meter(base.tagged("what", "cluster-rpc-cancellation", "unit", Units.CANCEL));
@@ -60,6 +68,21 @@ public class SemanticQueryReporter implements QueryReporter {
     @Override
     public void reportSmallQueryLatency(final long duration) {
         smallQueryLatency.update(duration);
+    }
+
+    @Override
+    public void reportLatencyVsSize(
+        final long durationNs, final long preAggregationSampleSize, final DateRange range
+    ) {
+        if (range.diff() != 0) {
+            long rangeMs = range.diff();
+            // Density of read metrics - amount of samples per hour
+            queryMetricDensity.update((3600_000L * preAggregationSampleSize) / rangeMs);
+        }
+
+        if (durationNs != 0) {
+            queryReadRate.update((1000_000_000 * preAggregationSampleSize) / durationNs);
+        }
     }
 
     @Override

@@ -21,6 +21,8 @@
 
 package com.spotify.heroic.statistics.noop;
 
+import com.spotify.heroic.common.DateRange;
+import com.spotify.heroic.common.Series;
 import com.spotify.heroic.metric.MetricBackend;
 import com.spotify.heroic.statistics.DataInMemoryReporter;
 import com.spotify.heroic.statistics.FutureReporter;
@@ -31,6 +33,12 @@ public class NoopMetricBackendReporter implements MetricBackendReporter {
     public static final DataInMemoryReporter DATA_IN_MEMORY_REPORTER = new DataInMemoryReporter() {
         @Override
         public void reportRowsAccessed(final long n) {
+        }
+
+        @Override
+        public void reportSliceRead(
+            final Series series, final DateRange range, final long n
+        ) {
         }
 
         @Override

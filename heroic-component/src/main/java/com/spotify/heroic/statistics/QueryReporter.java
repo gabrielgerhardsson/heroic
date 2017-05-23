@@ -21,6 +21,8 @@
 
 package com.spotify.heroic.statistics;
 
+import com.spotify.heroic.common.DateRange;
+
 public interface QueryReporter {
     /**
      * Report on a full query, on an API node level
@@ -35,6 +37,8 @@ public interface QueryReporter {
      * @param duration Duration of query, in ms
      */
     void reportSmallQueryLatency(long duration);
+
+    void reportLatencyVsSize(long duration, long preAggregationSampleSize, DateRange range);
 
     void reportClusterNodeRpcError();
     void reportClusterNodeRpcCancellation();
