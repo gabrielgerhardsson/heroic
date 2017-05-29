@@ -451,6 +451,7 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
     ) {
         final BigtableDataClient client = c.dataClient();
 
+        final Boolean hasReportedDensity = false;
         final List<AsyncFuture<FetchData.Result>> fetches = new ArrayList<>(prepared.size());
 
         for (final PreparedQuery p : prepared) {
@@ -474,6 +475,7 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
                     watcher.readData(row.getCells().size());
                     List<Metric> metrics = Lists.transform(row.getCells(), transform);
                     metricsConsumer.accept(MetricCollection.build(type, metrics));
+                    watcher.reportRowDensity(getDensity(metrics));
                 }
                 return FetchData.result(fs.end());
             }));
@@ -481,6 +483,11 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
         return async
             .collect(fetches, FetchData.collectResult(FETCH))
             .onResolved(ignore -> watcher.accessedRows(prepared.size()));
+    }
+
+    private <T> long getDensity(List<Metric> metrics) {
+        long diff = metrics.get(metrics.size() - 1).getTimestamp() - metrics.get(0).getTimestamp();
+        return diff / (metrics.size() - 1);
     }
 
     <T> ByteString serialize(T rowKey, Serializer<T> serializer) throws IOException {

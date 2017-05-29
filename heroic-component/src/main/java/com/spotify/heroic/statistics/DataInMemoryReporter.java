@@ -21,9 +21,6 @@
 
 package com.spotify.heroic.statistics;
 
-import com.spotify.heroic.common.DateRange;
-import com.spotify.heroic.common.Series;
-
 /*
  * Keep track of amount of expected in-memory data. One instance of this class per operation (i.e.
  * a query).
@@ -37,13 +34,11 @@ public interface DataInMemoryReporter {
     void reportRowsAccessed(long n);
 
     /**
-     * Report that a slice has been read.
+     * report the density of a row that was read from the metric backend
      *
-     * @param series the series that this request is in regard to
-     * @param range range of the original request that this slice is a part of
-     * @param n amount of metric data
+     * @param msBetweenSamples density, number of samples per hour
      */
-    void reportSliceRead(Series series, DateRange range, long n);
+    void reportRowDensity(long msBetweenSamples);
 
     /**
      * report that data has been read into memory

@@ -28,11 +28,13 @@ import com.spotify.heroic.aggregation.AggregationInstance;
 import com.spotify.heroic.cluster.ClusterShard;
 import com.spotify.heroic.common.DateRange;
 import com.spotify.heroic.common.Features;
+import com.spotify.heroic.common.Histogram;
 import com.spotify.heroic.common.Statistics;
 import com.spotify.heroic.filter.Filter;
 import com.spotify.heroic.querylogging.QueryContext;
 import eu.toolchain.async.Collector;
 import eu.toolchain.async.Transform;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -45,15 +47,16 @@ public final class FullQuery {
     private final List<ResultGroup> groups;
     private final Statistics statistics;
     private final ResultLimits limits;
+    private final Histogram.Builder dataDensity;
 
     public static FullQuery error(final QueryTrace trace, final RequestError error) {
         return new FullQuery(trace, ImmutableList.of(error), ImmutableList.of(), Statistics.empty(),
-            ResultLimits.of());
+            ResultLimits.of(), Histogram.empty());
     }
 
     public static FullQuery empty(final QueryTrace trace, final ResultLimits limits) {
         return new FullQuery(trace, ImmutableList.of(), ImmutableList.of(), Statistics.empty(),
-            limits);
+            limits, Histogram.empty());
     }
 
     public static Collector<FullQuery, FullQuery> collect(final QueryTrace.Identifier what) {
@@ -65,6 +68,7 @@ public final class FullQuery {
             final ImmutableList.Builder<ResultGroup> groups = ImmutableList.builder();
             Statistics statistics = Statistics.empty();
             final ImmutableSet.Builder<ResultLimit> limits = ImmutableSet.builder();
+            List<Long> histogramData = new ArrayList<>();
 
             for (final FullQuery r : results) {
                 traces.add(r.trace);
@@ -72,10 +76,11 @@ public final class FullQuery {
                 groups.addAll(r.groups);
                 statistics = statistics.merge(r.statistics);
                 limits.addAll(r.limits.getLimits());
+                histogramData.addAll(r.dataDensity)
             }
 
             return new FullQuery(w.end(traces.build()), errors.build(), groups.build(), statistics,
-                new ResultLimits(limits.build()));
+                new ResultLimits(limits.build()), Histogram.empty());
         };
     }
 

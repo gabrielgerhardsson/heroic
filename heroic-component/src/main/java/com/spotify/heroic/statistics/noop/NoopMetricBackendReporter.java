@@ -36,9 +36,7 @@ public class NoopMetricBackendReporter implements MetricBackendReporter {
         }
 
         @Override
-        public void reportSliceRead(
-            final Series series, final DateRange range, final long n
-        ) {
+        public void reportRowDensity(final long msBetweenSamples) {
         }
 
         @Override

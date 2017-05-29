@@ -136,8 +136,6 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
             private final LongAccumulator rowsAccessed = new LongAccumulator((x, y) -> x + y, 0L);
             private final LongAccumulator maxDataInMemory = new LongAccumulator(Long::max, 0L);
             private final Stopwatch queryWatch = Stopwatch.createStarted();
-            private final Map<Integer, ReadRangeStatistics> seriesDensity =
-                new ConcurrentHashMap<>();
 
             @Override
             public void reportRowsAccessed(final long n) {
@@ -145,13 +143,8 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
             }
 
             @Override
-            public void reportSliceRead(
-                final Series series, final DateRange range, final long n
-            ) {
-                int key = series.hashCode() + range.hashCode();
-                ReadRangeStatistics stats = seriesDensity.computeIfAbsent(key,
-                    ignore -> new ReadRangeStatistics(range, new AtomicLong(0L)));
-                stats.getValue().addAndGet(n);
+            public void reportRowDensity(final long msBetweenSamples) {
+                queryRowDensity.update(msBetweenSamples);
             }
 
             @Override
@@ -189,19 +182,8 @@ public class SemanticMetricBackendReporter implements MetricBackendReporter {
                 if (duration != 0) {
                     queryReadRate.update((1000_000_000 * dataReadLocal) / duration);
                 }
-
-                for (ReadRangeStatistics stats : seriesDensity.values()) {
-                    long rangeMs = stats.getRange().diff();
-                    queryRowDensity.update((3600_000L * stats.getValue().get()) / rangeMs);
-                }
             }
         };
-    }
-
-    @Data
-    private class ReadRangeStatistics {
-        private final DateRange range;
-        private final AtomicLong value;
     }
 
     @Override

@@ -31,6 +31,12 @@ public interface FetchQuotaWatcher {
     void readData(long n);
 
     /**
+     * Indicates the distance between samples in a row that was read from the metric backend
+     * @param msBetweenSamples
+     */
+    void reportRowDensity(long msBetweenSamples);
+
+    /**
      * Indicates if readData quota has been breached or not.
      *
      * @return {@code true} if there is data left to be read, {@code false} otherwise.
@@ -55,6 +61,10 @@ public interface FetchQuotaWatcher {
     FetchQuotaWatcher NO_QUOTA = new FetchQuotaWatcher() {
         @Override
         public void readData(long n) {
+        }
+
+        @Override
+        public void reportRowDensity(final long msBetweenSamples) {
         }
 
         @Override

@@ -37,6 +37,7 @@ import com.spotify.heroic.common.Feature;
 import com.spotify.heroic.common.Features;
 import com.spotify.heroic.common.GroupSet;
 import com.spotify.heroic.common.Groups;
+import com.spotify.heroic.common.Histogram;
 import com.spotify.heroic.common.OptionalLimit;
 import com.spotify.heroic.common.QuotaViolationException;
 import com.spotify.heroic.common.SelectedGroup;
@@ -57,14 +58,17 @@ import eu.toolchain.async.LazyTransform;
 import eu.toolchain.async.StreamCollector;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.inject.Inject;
 import javax.inject.Named;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
@@ -422,6 +426,12 @@ public class LocalMetricManager implements MetricManager {
         }
     }
 
+    @Data
+    private static class ReadRangeStatistics {
+        private final DateRange range;
+        private final AtomicLong value;
+    }
+
     @RequiredArgsConstructor
     private abstract static class ResultCollector
         implements StreamCollector<FetchData.Result, FullQuery> {
@@ -436,17 +446,23 @@ public class LocalMetricManager implements MetricManager {
         final OptionalLimit groupLimit;
         final boolean failOnLimits;
 
+        private final Map<Integer, ReadRangeStatistics> seriesDensity = new ConcurrentHashMap<>();
+
         @Override
         public void resolved(final FetchData.Result result) throws Exception {
             requestErrors.addAll(result.getErrors());
         }
 
         void acceptMetricsCollection(
-            final Series series, final DateRange range, MetricCollection g
+            final Series series, final DateRange range, final MetricCollection g
         ) {
             g.updateAggregation(session, series.getTags(), ImmutableSet.of(series));
             dataInMemoryReporter.reportDataNoLongerNeeded(g.size());
-            dataInMemoryReporter.reportSliceRead(series, range, g.size());
+
+            final int key = series.hashCode() + range.hashCode();
+            ReadRangeStatistics stats = seriesDensity.computeIfAbsent(key,
+                ignore -> new ReadRangeStatistics(range, new AtomicLong(0L)));
+            stats.getValue().addAndGet(g.size());
         }
 
         @Override
@@ -538,6 +554,7 @@ public class LocalMetricManager implements MetricManager {
         private final long dataLimit;
         private final long retainLimit;
         private final DataInMemoryReporter dataInMemoryReporter;
+        private final Histogram.Builder rowDensityBuilder = Histogram.builder();
 
         private final AtomicLong read = new AtomicLong();
         private final AtomicLong retained = new AtomicLong();
@@ -548,6 +565,12 @@ public class LocalMetricManager implements MetricManager {
             throwIfViolated();
             // Must be called after checkViolation above, since that one might throw an exception.
             dataInMemoryReporter.reportDataHasBeenRead(n);
+        }
+
+        @Override
+        public void reportRowDensity(final long msBetweenSamples) {
+            rowDensityBuilder.add(msBetweenSamples);
+            dataInMemoryReporter.reportRowDensity(msBetweenSamples);
         }
 
         @Override
