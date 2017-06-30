@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
+import com.spotify.heroic.ObjectHasher;
 import lombok.EqualsAndHashCode;
 
 import java.io.IOException;
@@ -137,6 +138,13 @@ class ValueOptionalLimit implements OptionalLimit {
     @Override
     public OptionalLimit orElse(final OptionalLimit other) {
         return this;
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), h -> {
+            h.putLongField("limit", limit);
+        });
     }
 
     @Override

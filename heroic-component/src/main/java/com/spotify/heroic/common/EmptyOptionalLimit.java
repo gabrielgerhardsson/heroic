@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
+import com.spotify.heroic.ObjectHasher;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -114,6 +115,11 @@ class EmptyOptionalLimit implements OptionalLimit {
     @Override
     public OptionalLimit orElse(final OptionalLimit other) {
         return other;
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), h -> {});
     }
 
     @Override

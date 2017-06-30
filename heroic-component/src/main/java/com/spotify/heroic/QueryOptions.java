@@ -92,6 +92,13 @@ public class QueryOptions {
     public void hashTo(final ObjectHasher hasher) {
         hasher.putObject(getClass(), h -> {
             hasher.putOptionalField("bucketStrategy", bucketStrategy, BucketStrategy::hashTo);
+            hasher.putField("dataLimit", dataLimit, OptionalLimit::hashTo);
+            hasher.putField("aggregationLimit", aggregationLimit, OptionalLimit::hashTo);
+            hasher.putField("groupLimit", groupLimit, OptionalLimit::hashTo);
+            hasher.putField("seriesLimit", seriesLimit, OptionalLimit::hashTo);
+            hasher.putOptionalField("failOnLimits", failOnLimits, (val, innerHasher) -> {
+                innerHasher.putBooleanField("failOnLimits", val);
+            });
         });
     }
 
