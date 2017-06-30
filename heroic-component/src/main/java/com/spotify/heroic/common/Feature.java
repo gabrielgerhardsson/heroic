@@ -23,6 +23,7 @@ package com.spotify.heroic.common;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
+import com.spotify.heroic.ObjectHasher;
 
 /**
  * Features that can be enabled in configuration, or per-query.
@@ -99,5 +100,8 @@ public enum Feature {
     @Override
     public String toString() {
         return id;
+    }
+
+    public void hashTo(final ObjectHasher hasher) {
     }
 }

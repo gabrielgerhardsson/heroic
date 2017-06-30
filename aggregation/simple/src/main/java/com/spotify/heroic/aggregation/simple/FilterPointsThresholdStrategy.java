@@ -21,6 +21,7 @@
 
 package com.spotify.heroic.aggregation.simple;
 
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.metric.MetricCollection;
 import com.spotify.heroic.metric.MetricType;
 import com.spotify.heroic.metric.Point;
@@ -45,6 +46,14 @@ public class FilterPointsThresholdStrategy implements MetricMappingStrategy {
         } else {
             return metrics;
         }
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), h -> {
+            h.putField("filterType", filterType, FilterKThresholdType::hashTo);
+            h.putDoubleField("threshold", threshold);
+        });
     }
 
     private List<Point> filterWithThreshold(List<Point> points) {

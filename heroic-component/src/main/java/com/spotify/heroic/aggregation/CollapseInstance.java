@@ -25,6 +25,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import com.spotify.heroic.ObjectHasher;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

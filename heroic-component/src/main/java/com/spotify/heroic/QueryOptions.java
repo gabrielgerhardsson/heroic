@@ -89,6 +89,12 @@ public class QueryOptions {
         return new Builder();
     }
 
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), h -> {
+            hasher.putOptionalField("bucketStrategy", bucketStrategy, BucketStrategy::hashTo);
+        });
+    }
+
     public static class Builder {
         private Optional<BucketStrategy> bucketStrategy = Optional.empty();
         private Optional<Tracing> tracing = Optional.empty();

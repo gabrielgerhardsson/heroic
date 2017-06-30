@@ -21,6 +21,7 @@
 
 package com.spotify.heroic.filter;
 
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.common.Series;
 import com.spotify.heroic.grammar.DSL;
 import lombok.Data;
@@ -71,6 +72,13 @@ public class HasTagFilter implements Filter {
     @Override
     public String toDSL() {
         return "+" + DSL.dumpString(tag);
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(this.getClass(), h -> {
+            h.putStringField("tag", tag);
+        });
     }
 
     public static Filter of(String tag) {

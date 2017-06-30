@@ -23,6 +23,7 @@ package com.spotify.heroic.aggregation.simple;
 
 import static java.util.stream.Collectors.toList;
 
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.aggregation.AggregationInstance;
 import com.spotify.heroic.aggregation.AggregationOutput;
 import com.spotify.heroic.aggregation.AggregationResult;
@@ -66,6 +67,13 @@ public abstract class MetricMappingAggregation implements AggregationInstance {
     @Override
     public AggregationInstance distributed() {
         return INNER;
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), h -> {
+            h.putField("metricMappingStrategy", metricMappingStrategy, MetricMappingStrategy::hashTo);
+        });
     }
 
     class Session implements AggregationSession {

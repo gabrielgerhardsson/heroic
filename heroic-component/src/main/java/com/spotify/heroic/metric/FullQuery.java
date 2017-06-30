@@ -23,6 +23,7 @@ package com.spotify.heroic.metric;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.aggregation.AggregationInstance;
 import com.spotify.heroic.cluster.ClusterShard;
@@ -134,6 +135,15 @@ public final class FullQuery {
 
         public Summary summarize() {
             return new Summary(source, filter, range, aggregation, options);
+        }
+
+        public void hashTo(final ObjectHasher hasher) {
+            hasher.putStringField("source", source.identifier());
+            hasher.putField("filter", filter, Filter::hashTo);
+            hasher.putField("range", range, DateRange::hashTo);
+            hasher.putField("aggregation", aggregation, AggregationInstance::hashTo);
+            hasher.putField("options", options, QueryOptions::hashTo);
+            hasher.putField("features", features, Features::hashTo);
         }
 
         @Data

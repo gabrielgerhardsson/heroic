@@ -31,6 +31,7 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.spotify.folsom.MemcacheClient;
 import com.spotify.heroic.HeroicMappers;
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.aggregation.AggregationInstance;
 import com.spotify.heroic.cache.CacheScope;
@@ -240,9 +241,22 @@ public class MemcachedQueryCache implements QueryCache {
     private String buildCacheKey(final FullQuery.Request request) {
         final Hasher hasher = HASH_FUNCTION.newHasher();
 
+        if (true) {
+            hashAsCustom(request, hasher);
+        } else {
+            hashAsJson(request, hasher);
+        }
+
+        return hasher.hash().toString();
+    }
+
+    private void hashAsCustom(final FullQuery.Request request, final Hasher hasher) {
+        request.hashTo(new ObjectHasher(hasher));
+    }
+
+    private void hashAsJson(final FullQuery.Request request, final Hasher hasher) {
         final CacheKey key =
-            new CacheKey(request.getSource(), request.getFilter(), request.getRange(),
-                request.getAggregation(), request.getOptions(), request.getFeatures());
+            new CacheKey(request.getSource(), request.getFilter(), request.getRange(), request.getAggregation(), request.getOptions(), request.getFeatures());
 
         final byte[] bytes;
 
@@ -253,8 +267,6 @@ public class MemcachedQueryCache implements QueryCache {
         }
 
         hasher.putBytes(bytes);
-
-        return hasher.hash().toString();
     }
 
     /**

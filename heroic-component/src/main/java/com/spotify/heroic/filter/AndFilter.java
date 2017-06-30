@@ -23,6 +23,7 @@ package com.spotify.heroic.filter;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.common.Series;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -178,6 +179,13 @@ public class AndFilter implements Filter {
     @Override
     public String toDSL() {
         return "(" + and.join(statements.stream().map(Filter::toDSL).iterator()) + ")";
+    }
+
+    @Override
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(this.getClass(), h -> {
+            h.putListField("statements", statements, Filter::hashTo);
+        });
     }
 
     public static Filter of(Filter... filters) {
