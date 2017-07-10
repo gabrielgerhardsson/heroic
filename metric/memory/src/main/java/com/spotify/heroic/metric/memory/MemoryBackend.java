@@ -22,7 +22,6 @@
 package com.spotify.heroic.metric.memory;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Multimap;
 import com.hazelcast.core.MultiMap;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.common.DateRange;
@@ -46,14 +45,13 @@ import eu.toolchain.async.AsyncFramework;
 import eu.toolchain.async.AsyncFuture;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Named;
 import lombok.Data;
@@ -185,37 +183,46 @@ public class MemoryBackend extends AbstractMetricBackend {
             return MetricCollection.build(key.getSource(), ImmutableList.of());
         }
 
-        
-        final Iterable<Metric> metrics =
-            tree.subMap(range.getStart(), false, range.getEnd(), true).values();
-        final List<Metric> data = ImmutableList.copyOf(metrics);
+        List<Pair<Long, Metric>> listOfValues = new ArrayList<>(allValues);
+        Collections.sort(listOfValues, (object1, object2) -> {
+            Pair<Long, Metric> val1 = (Pair<Long, Metric>) object1;
+            Pair<Long, Metric> val2 = (Pair<Long, Metric>) object2;
+            if (val1.fst < val2.fst) {
+                return -1;
+            } else if (val1.fst > val2.fst) {
+                return 1;
+            }
+            return 0;
+        });
+
+        int index = 0;
+        int prevIndex = 0;
+        int startIndex = 0;
+        int endIndex = 0;
+        for (; index < listOfValues.size(); index++) {
+            // Non-inclusive start of range |
+            if (listOfValues.get(index).fst > range.getStart()) {
+                // Use previous index to get a non-inclusive start index
+                startIndex = prevIndex;
+                break;
+            }
+            prevIndex = index;
+        }
+        for (; index < listOfValues.size(); index++) {
+            // Inclusive end of range       |
+            if (listOfValues.get(index).fst > range.getEnd()) {
+                endIndex = index;
+                break;
+            }
+        }
+
+        final List<Metric> data = listOfValues
+            .subList(startIndex, endIndex)
+            .stream()
+            .map((pair) -> pair.snd)
+            .collect(Collectors.toList());
+
         watcher.readData(data.size());
         return MetricCollection.build(key.getSource(), data);
-    }
-
-    /**
-     * Get or create a new navigable map to store time data.
-     *
-     * @param key The key to create the map under.
-     * @return An existing, or a newly created navigable map for the given key.
-     */
-    private NavigableMap<Long, Metric> putOrCreate(final MemoryKey key, final Consumer<NavigableMap<>) {
-        final NavigableMap<Long, Metric> tree = storage.get(key);
-
-        if (tree != null) {
-            return tree;
-        }
-
-        synchronized (createLock) {
-            final NavigableMap<Long, Metric> checked = storage.get(key);
-
-            if (checked != null) {
-                return checked;
-            }
-
-            final NavigableMap<Long, Metric> created = new TreeMap<>();
-            storage.put(key, created);
-            return created;
-        }
     }
 }
