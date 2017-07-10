@@ -22,6 +22,8 @@
 package com.spotify.heroic.metric.memory;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Multimap;
+import com.hazelcast.core.MultiMap;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.common.DateRange;
 import com.spotify.heroic.common.Groups;
@@ -39,14 +41,18 @@ import com.spotify.heroic.metric.MetricCollection;
 import com.spotify.heroic.metric.MetricType;
 import com.spotify.heroic.metric.QueryTrace;
 import com.spotify.heroic.metric.WriteMetric;
+import com.sun.tools.javac.util.Pair;
 import eu.toolchain.async.AsyncFramework;
 import eu.toolchain.async.AsyncFuture;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -79,12 +85,12 @@ public class MemoryBackend extends AbstractMetricBackend {
 
     private final AsyncFramework async;
     private final Groups groups;
-    private final Map<MemoryKey, NavigableMap<Long, Metric>> storage;
+    private final MultiMap<MemoryKey, Pair<Long, Metric>> storage;
 
     @Inject
     public MemoryBackend(
         final AsyncFramework async, final Groups groups,
-        @Named("storage") final Map<MemoryKey, NavigableMap<Long, Metric>> storage,
+        @Named("storage") final MultiMap<MemoryKey, Pair<Long, Metric>> storage,
         LifeCycleRegistry registry
     ) {
         super(async);
@@ -157,35 +163,34 @@ public class MemoryBackend extends AbstractMetricBackend {
         private final Series series;
     }
 
-    private void writeOne(final WriteMetric.Request request) {
+    private AsyncFuture<WriteMetric> writeOne(final WriteMetric.Request request) {
         final MetricCollection g = request.getData();
 
         final MemoryKey key = new MemoryKey(g.getType(), request.getSeries());
-        final NavigableMap<Long, Metric> tree = getOrCreate(key);
-
-        synchronized (tree) {
+        RequestTimer<WriteMetric> timer = WriteMetric.timer();
+        return async.call(() -> {
             for (final Metric d : g.getData()) {
-                tree.put(d.getTimestamp(), d);
+                storage.put(key, Pair.of(d.getTimestamp(), d));
             }
-        }
+            return timer.end();
+        });
     }
 
     private MetricCollection doFetch(
         final MemoryKey key, final DateRange range, final FetchQuotaWatcher watcher
     ) {
-        final NavigableMap<Long, Metric> tree = storage.get(key);
+        final Collection<Pair<Long, Metric>> allValues = storage.get(key);
 
-        if (tree == null) {
+        if (allValues == null) {
             return MetricCollection.build(key.getSource(), ImmutableList.of());
         }
 
-        synchronized (tree) {
-            final Iterable<Metric> metrics =
-                tree.subMap(range.getStart(), false, range.getEnd(), true).values();
-            final List<Metric> data = ImmutableList.copyOf(metrics);
-            watcher.readData(data.size());
-            return MetricCollection.build(key.getSource(), data);
-        }
+        
+        final Iterable<Metric> metrics =
+            tree.subMap(range.getStart(), false, range.getEnd(), true).values();
+        final List<Metric> data = ImmutableList.copyOf(metrics);
+        watcher.readData(data.size());
+        return MetricCollection.build(key.getSource(), data);
     }
 
     /**
@@ -194,7 +199,7 @@ public class MemoryBackend extends AbstractMetricBackend {
      * @param key The key to create the map under.
      * @return An existing, or a newly created navigable map for the given key.
      */
-    private NavigableMap<Long, Metric> getOrCreate(final MemoryKey key) {
+    private NavigableMap<Long, Metric> putOrCreate(final MemoryKey key, final Consumer<NavigableMap<>) {
         final NavigableMap<Long, Metric> tree = storage.get(key);
 
         if (tree != null) {

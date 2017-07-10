@@ -21,30 +21,36 @@
 
 package com.spotify.heroic.metric.memory;
 
+import static java.util.Optional.empty;
+import static java.util.Optional.of;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableList;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.core.MultiMap;
 import com.spotify.heroic.common.DynamicModuleId;
 import com.spotify.heroic.common.Groups;
 import com.spotify.heroic.common.ModuleId;
 import com.spotify.heroic.dagger.PrimaryComponent;
 import com.spotify.heroic.metric.Metric;
 import com.spotify.heroic.metric.MetricModule;
+import com.sun.tools.javac.util.Pair;
 import dagger.Component;
 import dagger.Module;
 import dagger.Provides;
 import eu.toolchain.async.AsyncFramework;
-import lombok.Data;
-
-import javax.inject.Named;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-
-import static java.util.Optional.empty;
-import static java.util.Optional.of;
+import javax.inject.Named;
+import lombok.Data;
 
 @Data
 @ModuleId("memory")
@@ -54,15 +60,18 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
     private final Optional<String> id;
     private final Groups groups;
     private final boolean synchronizedStorage;
+    private final List<String> servers;
 
     @JsonCreator
     public MemoryMetricModule(
         @JsonProperty("id") Optional<String> id, @JsonProperty("groups") Optional<Groups> groups,
-        @JsonProperty("synchronizedStorage") Optional<Boolean> synchronizedStorage
+        @JsonProperty("synchronizedStorage") Optional<Boolean> synchronizedStorage,
+        @JsonProperty("servers") Optional<List<String>> servers
     ) {
         this.id = id;
         this.groups = groups.orElseGet(Groups::empty).or(DEFAULT_GROUP);
         this.synchronizedStorage = synchronizedStorage.orElse(false);
+        this.servers = servers.orElse(ImmutableList.of());
     }
 
     @Override
@@ -93,14 +102,28 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
         @Provides
         @MemoryScope
         @Named("storage")
-        public Map<MemoryBackend.MemoryKey, NavigableMap<Long, Metric>> metricBackend(
+        public MultiMap<MemoryBackend.MemoryKey, Pair<Long, Metric>> metricBackend(
             final AsyncFramework async
         ) {
+            if (servers.size() > 0) {
+                HazelcastInstance instance = Hazelcast.getClientInstance(servers);
+                return instance.getMultiMap("metrics");
+            }
+            throw new RuntimeException("Not implemented");
+            /*
             if (synchronizedStorage) {
-                return Collections.synchronizedMap(new HashMap<>());
+                return new ConcurrentHashMap<>();
             }
 
             return new ConcurrentSkipListMap<>(MemoryBackend.COMPARATOR);
+            */
+        }
+
+        @Provides
+        @MemoryScope
+        @Named("servers")
+        public List<String> servers() {
+            return servers;
         }
     }
 
@@ -117,6 +140,7 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
         private Optional<String> id = empty();
         private Optional<Groups> groups = empty();
         private Optional<Boolean> synchronizedStorage = empty();
+        private Optional<List<String>> servers = empty();
 
         public Builder id(String id) {
             this.id = of(id);
@@ -133,8 +157,13 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
             return this;
         }
 
+        public Builder servers(final List<String> servers) {
+            this.servers = of(servers);
+            return this;
+        }
+
         public MemoryMetricModule build() {
-            return new MemoryMetricModule(id, groups, synchronizedStorage);
+            return new MemoryMetricModule(id, groups, synchronizedStorage, servers);
         }
     }
 }
