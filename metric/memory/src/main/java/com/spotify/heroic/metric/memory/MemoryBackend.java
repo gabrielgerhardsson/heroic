@@ -23,7 +23,6 @@ package com.spotify.heroic.metric.memory;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.hash.HashFunction;
-import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 import com.hazelcast.core.ExecutionCallback;
 import com.hazelcast.core.HazelcastInstance;
@@ -60,7 +59,6 @@ import eu.toolchain.async.ResolvableFuture;
 import eu.toolchain.async.StreamCollector;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -93,7 +91,7 @@ public class MemoryBackend extends AbstractMetricBackend {
     private static final long CHUNK_SIZE_MS = 12 * 3600 * 1000;
 
     private static final HashFunction HASH_FUNCTION = Hashing.murmur3_128();
-    private static final int WRITE_PARALLELISM = 100;
+    private static final int WRITE_PARALLELISM = 8;
     private static final int READ_PARALLELISM = 100;
 
     static final List<BackendEntry> EMPTY_ENTRIES = new ArrayList<>();
@@ -245,12 +243,38 @@ public class MemoryBackend extends AbstractMetricBackend {
         IMap<Long, Double> map = getMapForKey(key);
         RequestTimer<WriteMetric> timer = WriteMetric.timer();
 
-        List<AsyncFuture<Void>> metricWriteFutures = new ArrayList<>();
+        List<Callable<AsyncFuture<Void>>> metricWriteCallables = new ArrayList<>();
+
         for (final Metric m : g.getData()) {
-            metricWriteFutures.add(bind(map.setAsync(m.getTimestamp(), ((Point) m).getValue())));
+            metricWriteCallables.add(() -> {
+                map.set(m.getTimestamp(), ((Point) m).getValue());
+                return async.resolved();
+            });
         }
 
-        AsyncFuture<Void> metricWriteFuture = async.collectAndDiscard(metricWriteFutures);
+        StreamCollector<Void, Void> collector = new StreamCollector<Void, Void>() {
+            @Override
+            public void resolved(final Void result) throws Exception {
+            }
+
+            @Override
+            public void failed(final Throwable cause) throws Exception {
+                log.error("Write failed: ", cause);
+            }
+
+            @Override
+            public void cancelled() throws Exception {
+            }
+
+            @Override
+            public Void end(
+                final int resolved, final int failed, final int cancelled
+            ) throws Exception {
+                return null;
+            }
+        };
+        AsyncFuture<Void> metricWriteFuture =
+            async.eventuallyCollect(metricWriteCallables, collector, WRITE_PARALLELISM);
 
         return metricWriteFuture
             .directTransform(result -> timer.end())
