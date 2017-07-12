@@ -10,7 +10,7 @@ public class MemoryBackendIT extends AbstractMetricBackendIT {
     protected void setupSupport() {
         super.setupSupport();
 
-        this.eventSupport = true;
+        this.eventSupport = false;
     }
 
     @Override

@@ -44,6 +44,7 @@ import com.spotify.heroic.metric.MetricCollection;
 import com.spotify.heroic.metric.MetricManagerModule;
 import com.spotify.heroic.metric.MetricModule;
 import com.spotify.heroic.metric.MetricType;
+import com.spotify.heroic.metric.Point;
 import com.spotify.heroic.metric.WriteMetric;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -350,7 +351,7 @@ public abstract class AbstractMetricBackendIT {
         // timestamps [1, maxTimestamp] since we can't fetch 0 (range start is exclusive)
         while (timestamp < maxTimestamp) {
             points.p(timestamp, random.nextDouble());
-            timestamp += Math.abs(random.nextInt((int) (maxTimestamp / 10000) + 1));
+            timestamp += Math.abs(random.nextInt((int) (maxTimestamp / 10000))) + 1;
         }
         points.p(maxTimestamp, random.nextDouble());
 
@@ -362,7 +363,6 @@ public abstract class AbstractMetricBackendIT {
                 QueryOptions.builder().build());
 
         List<MetricCollection> fetched = fetchMetrics(request, true);
-        System.out.println("fetched " + fetched.stream().map(MetricCollection::size).mapToInt(Integer::intValue).sum() + " metrics");
         assertEqualMetrics(mc, fetched);
         fetched = fetchMetrics(request, false);
         assertEqualMetrics(mc, fetched);

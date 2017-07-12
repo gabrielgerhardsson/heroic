@@ -25,9 +25,16 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
+import com.hazelcast.core.ExecutionCallback;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.core.ICompletableFuture;
+import com.hazelcast.core.IMap;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.DataSerializable;
+import com.hazelcast.query.EntryObject;
+import com.hazelcast.query.Predicate;
+import com.hazelcast.query.PredicateBuilder;
 import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.QueryOptions;
 import com.spotify.heroic.common.DateRange;
@@ -44,21 +51,24 @@ import com.spotify.heroic.metric.FetchQuotaWatcher;
 import com.spotify.heroic.metric.Metric;
 import com.spotify.heroic.metric.MetricCollection;
 import com.spotify.heroic.metric.MetricType;
+import com.spotify.heroic.metric.Point;
 import com.spotify.heroic.metric.QueryTrace;
 import com.spotify.heroic.metric.WriteMetric;
 import eu.toolchain.async.AsyncFramework;
 import eu.toolchain.async.AsyncFuture;
+import eu.toolchain.async.ResolvableFuture;
 import eu.toolchain.async.StreamCollector;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Named;
 import lombok.Data;
@@ -98,35 +108,32 @@ public class MemoryBackend extends AbstractMetricBackend {
         return a.getSeries().compareTo(b.getSeries());
     };
 
-    private final Object createLock = new Object();
-
     private final AsyncFramework async;
     private final Groups groups;
-    private final AsyncMultimap<MemoryKey, Long> timeIndex;
-    private final AsyncMultimap<Long, Metric> metrics;
+    private final HazelcastInstance instance;
 
     @Inject
     public MemoryBackend(
         final AsyncFramework async, final Groups groups,
-        @Named("storageTimeIndex") final AsyncMultimap<MemoryKey, Long> storageIndex,
-        @Named("storageMetrics") final AsyncMultimap<Long, Metric> storageMetrics,
-        LifeCycleRegistry registry
+        @Named("servers") final List<String> servers, LifeCycleRegistry registry
     ) {
         super(async);
         this.async = async;
         this.groups = groups;
-        this.timeIndex = storageIndex;
-        this.metrics = storageMetrics;
+        this.instance = Hazelcast.getClientInstance(servers);
     }
 
     @Override
     public Statistics getStatistics() {
+        /*
         try {
             return Statistics.of(MEMORY_KEYS, metrics.size().get());
         } catch (Exception e) {
             log.error("Async call failed: " + e);
             throw new RuntimeException(e);
         }
+        */
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
@@ -142,7 +149,7 @@ public class MemoryBackend extends AbstractMetricBackend {
     @Override
     public AsyncFuture<WriteMetric> write(WriteMetric.Request request) {
         final RequestTimer<WriteMetric> timer = WriteMetric.timer();
-        return writeOne(request);
+        return writeOne(request).onFailed(e -> log.error("Failed to write: ", e));
     }
 
     @Override
@@ -150,11 +157,12 @@ public class MemoryBackend extends AbstractMetricBackend {
         final QueryTrace.NamedWatch w = QueryTrace.watch(FETCH);
         final MemoryKey key = new MemoryKey(request.getType(), request.getSeries());
         final AsyncFuture<MetricCollection> metrics = doFetch(key, request.getRange(), watcher);
-        return metrics.directTransform(
-            mc -> FetchData.of(w.end(), ImmutableList.of(), ImmutableList.of(mc))).directTransform(result -> {
-            log.info("Read finished in " + result.getResult().getTrace().elapsed());
-            return result;
-        });
+        return metrics
+            .directTransform(mc -> FetchData.of(w.end(), ImmutableList.of(), ImmutableList.of(mc)))
+            .directTransform(result -> {
+                log.info("Read finished in " + result.getResult().getTrace().elapsed());
+                return result;
+            });
     }
 
     @Override
@@ -233,151 +241,47 @@ public class MemoryBackend extends AbstractMetricBackend {
         final MetricCollection g = request.getData();
 
         final MemoryKey key = new MemoryKey(g.getType(), request.getSeries());
+
+        IMap<Long, Double> map = getMapForKey(key);
         RequestTimer<WriteMetric> timer = WriteMetric.timer();
 
-        Set<Long> bases = new HashSet<>();
-
-        StreamCollector<Boolean, Boolean> collector = new StreamCollector<Boolean, Boolean>() {
-            List<Boolean> results = Collections.synchronizedList(new ArrayList<>());
-            List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
-
-            @Override
-            public void resolved(final Boolean result) throws Exception {
-                results.add(result);
-            }
-
-            @Override
-            public void failed(final Throwable cause) throws Exception {
-                errors.add(cause);
-                log.error("Write call failed: ", cause);
-            }
-
-            @Override
-            public void cancelled() throws Exception {
-
-            }
-
-            @Override
-            public Boolean end(final int resolved, final int failed, final int cancelled)
-                throws Exception {
-                // FIXME
-                return true;
-            }
-        };
-
-        List<Callable<AsyncFuture<Boolean>>> metricWriteCalls = new ArrayList<>();
+        List<AsyncFuture<Void>> metricWriteFutures = new ArrayList<>();
         for (final Metric m : g.getData()) {
-            long baseTs = getTimeBaseStart(m.getTimestamp());
-            bases.add(baseTs);
-
-            long hash = calculateHash(key, baseTs);
-            metricWriteCalls.add(() -> metrics.put(hash, m));
+            metricWriteFutures.add(bind(map.setAsync(m.getTimestamp(), ((Point) m).getValue())));
         }
-        AsyncFuture<Boolean> metricWriteFuture =
-            async.eventuallyCollect(metricWriteCalls, collector, WRITE_PARALLELISM);
 
-        return metricWriteFuture.directTransform(result -> timer.end()).directTransform(requestTimer -> {
-            log.info("Write finished in " + requestTimer.getTimes().toString());
-            return requestTimer;
-        });
+        AsyncFuture<Void> metricWriteFuture = async.collectAndDiscard(metricWriteFutures);
 
-        /*
-        return metricWriteFuture.lazyTransform((result) -> {
-            if (!result) {
-                // TODO
-            }
-
-            List<AsyncFuture<Boolean>> baseWrites = new ArrayList<AsyncFuture<Boolean>>();
-            for (Long base : bases) {
-                baseWrites.add(timeIndex.put(key, base));
-            }
-
-            StreamCollector<Boolean, Boolean> baseCollector =
-                new StreamCollector<Boolean, Boolean>() {
-                    List<Boolean> results = Collections.synchronizedList(new ArrayList<>());
-                    List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
-
-                    @Override
-                    public void resolved(final Boolean result) throws Exception {
-                        results.add(result);
-                    }
-
-                    @Override
-                    public void failed(final Throwable cause) throws Exception {
-                        errors.add(cause);
-                        log.error("Base write call failed: ", cause);
-                    }
-
-                    @Override
-                    public void cancelled() throws Exception {
-
-                    }
-
-                    @Override
-                    public Boolean end(final int resolved, final int failed, final int cancelled)
-                        throws Exception {
-                        // FIXME
-                        return true;
-                    }
-                };
-
-            return async.collect(baseWrites, baseCollector);
-
-            // FIXME: Propagate captured errors
-        }).directTransform(result -> timer.end());
-        */
+        return metricWriteFuture
+            .directTransform(result -> timer.end())
+            .directTransform(requestTimer -> {
+                log.info("Write finished in " + requestTimer.getTimes().toString());
+                return requestTimer;
+            });
     }
 
     private AsyncFuture<MetricCollection> doFetch(
         final MemoryKey key, final DateRange range, final FetchQuotaWatcher watcher
     ) {
-        AsyncFuture<List<Collection<Metric>>> chunks = fetchWholeChunks(key, range);
+        IMap<Long, Double> map = getMapForKey(key);
+
+        PredicateBuilder builder = new PredicateBuilder();
+        EntryObject e = builder.getEntryObject();
+        Predicate<Long, Double> predicate =
+            e.key().greaterThan(range.start()).and(e.lessEqual(range.end()));
+
+        AsyncFuture<Set<Map.Entry<Long, Double>>> getfuture = async.call(() -> {
+            return map.entrySet(predicate);
+        });
+
         List<Metric> data = new ArrayList<>();
-
-        return chunks.directTransform(list -> {
-            final int numberOfMetricsRead =
-                list.stream().map(Collection::size).mapToInt(Integer::intValue).sum();
-            watcher.readData(numberOfMetricsRead);
-
-            sortCollectionsList(list);
-            removeEmptyCollections(list);
-
-            if (list.size() == 0) {
-                return MetricCollection.empty();
-            } else if (list.size() == 1) {
-                for (final Metric m : list.get(0)) {
-                    if (m.getTimestamp() > range.start() && m.getTimestamp() <= range.end()) {
-                        data.add(m);
-                    }
-                }
-                sortMetricsByTime(data);
-                return MetricCollection.build(key.getSource(), data);
-            }
-
-            final Collection<Metric> first = list.get(0);
-            for (final Metric m : first) {
-                // Non-inclusive start of range
-                if (m.getTimestamp() <= range.getStart()) {
-                    continue;
-                }
-                data.add(m);
-            }
-            int index = 1;
-            for (; index < list.size() - 1; index++) {
-                data.addAll(list.get(index));
-            }
-            final Collection<Metric> last = list.get(index);
-            for (final Metric m : last) {
-                // Inclusive end of range
-                if (m.getTimestamp() > range.getStart()) {
-                    continue;
-                }
-                data.add(m);
-            }
-
+        return getfuture.directTransform(result -> {
+            data.addAll(result
+                .stream()
+                .map(entry -> new Point(entry.getKey(), entry.getValue()))
+                .collect(Collectors.toList()));
             sortMetricsByTime(data);
-
-            return MetricCollection.build(key.getSource(), data);
+            return MetricCollection.build(MetricType.POINT, data);
         });
     }
 
@@ -395,96 +299,28 @@ public class MemoryBackend extends AbstractMetricBackend {
         });
     }
 
-    private void sortCollectionsList(final List<Collection<Metric>> list) {
-        Collections.sort(list, (c1, c2) -> {
-            if (c1.size() == 0 || c2.size() == 0) {
-                if (c1.size() == 0 && c2.size() == 0) {
-                    return 0;
-                } else if (c1.size() == 0) {
-                    return -1;
-                } else {
-                    return 1;
-                }
-            }
-            final long ts1 = c1.iterator().next().getTimestamp();
-            final long ts2 = c2.iterator().next().getTimestamp();
-            if (ts1 < ts2) {
-                return -1;
-            } else if (ts1 > ts2) {
-                return 1;
-            }
-            return 0;
-        });
-    }
-
-    private void removeEmptyCollections(final List<Collection<Metric>> list) {
-        // Remove empty collections - will always be at the start of the list
-        while (list.size() > 0 && list.get(0).size() == 0) {
-            list.remove(0);
-        }
-    }
-
-    private AsyncFuture<List<Collection<Metric>>> fetchWholeChunks(MemoryKey key, DateRange range) {
-        final List<AsyncFuture<Collection<Metric>>> allChunkFutures = new ArrayList<>();
-        final long startBase = getTimeBaseStart(range.getStart());
-        final long endBase = getTimeBaseStart(range.getEnd());
-
-        List<Callable<AsyncFuture<Collection<Metric>>>> allChunkCallables = new ArrayList<>();
-        for (long base = startBase; base <= endBase; base += CHUNK_SIZE_MS) {
-            final Long finalBase = base;
-            allChunkCallables.add(() -> fetchWholeChunk(key, finalBase));
-        }
-
-        final StreamCollector<Collection<Metric>, List<Collection<Metric>>> collector =
-            new StreamCollector<Collection<Metric>, List<Collection<Metric>>>() {
-                List<Collection<Metric>> results = Collections.synchronizedList(new ArrayList<>());
-                List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
-
-                @Override
-                public void resolved(final Collection<Metric> result) throws Exception {
-                    results.add(result);
-                }
-
-                @Override
-                public void failed(final Throwable cause) throws Exception {
-                    errors.add(cause);
-                    log.error("Base write call failed: ", cause);
-                }
-
-                @Override
-                public void cancelled() throws Exception {
-
-                }
-
-                @Override
-                public List<Collection<Metric>> end(
-                    final int resolved, final int failed, final int cancelled
-                ) throws Exception {
-                    return results;
-                }
-            };
-
-        return async.eventuallyCollect(allChunkCallables, collector, READ_PARALLELISM);
-    }
-
-    private AsyncFuture<Collection<Metric>> fetchWholeChunk(
-        final MemoryKey key, final long baseTs
-    ) {
-        final long hash = calculateHash(key, baseTs);
-        return metrics.get(hash);
-    }
-
-    long getTimeBaseStart(long timestampMs) {
-        return timestampMs - (timestampMs % CHUNK_SIZE_MS);
-    }
-
-    private long calculateHash(MemoryKey key, long baseTs) {
-        Hasher hasher = HASH_FUNCTION.newHasher();
-        ObjectHasher objectHasher = new ObjectHasher(hasher);
-
+    private IMap<Long, Double> getMapForKey(final MemoryKey key) {
+        ObjectHasher objectHasher = new ObjectHasher(HASH_FUNCTION.newHasher());
         key.hashTo(objectHasher);
-        objectHasher.putField("base", baseTs, objectHasher.longValue());
+        final String keyHash = objectHasher.getHasher().hash().toString();
+        return instance.getMap(keyHash);
+    }
 
-        return hasher.hash().asLong();
+    private <T> AsyncFuture<T> bind(ICompletableFuture<T> hazelcastFuture) {
+        ResolvableFuture<T> future = async.future();
+
+        hazelcastFuture.andThen(new ExecutionCallback<T>() {
+            @Override
+            public void onResponse(final T response) {
+                future.resolve(response);
+            }
+
+            @Override
+            public void onFailure(final Throwable t) {
+                future.fail(t);
+            }
+        });
+
+        return future;
     }
 }
