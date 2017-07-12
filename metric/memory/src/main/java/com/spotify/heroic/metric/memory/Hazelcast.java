@@ -15,7 +15,7 @@ public class Hazelcast {
         String user = "test";
         String pass = "password";
         ClientConfig clientConfig = new ClientConfig();
-        clientConfig.setGroupConfig(new GroupConfig(user, pass));
+        //clientConfig.setGroupConfig(new GroupConfig(user, pass));
 
         ClientNetworkConfig networkConfig = new ClientNetworkConfig();
         for (String address : servers) {

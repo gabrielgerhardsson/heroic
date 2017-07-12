@@ -22,14 +22,25 @@
 package com.spotify.heroic.metric;
 
 import com.google.common.hash.Hasher;
+import com.hazelcast.nio.ObjectDataInput;
+import com.hazelcast.nio.ObjectDataOutput;
+import com.hazelcast.nio.serialization.DataSerializable;
+import java.io.IOException;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
+@NoArgsConstructor
+@RequiredArgsConstructor
 @Data
 @EqualsAndHashCode
-public class Point implements Metric {
-    private final long timestamp;
-    private final double value;
+public class Point implements Metric, DataSerializable {
+    @NonNull
+    private long timestamp;
+    @NonNull
+    private double value;
 
     @Override
     public boolean valid() {
@@ -40,5 +51,17 @@ public class Point implements Metric {
     public void hash(final Hasher hasher) {
         hasher.putInt(MetricType.POINT.ordinal());
         hasher.putDouble(value);
+    }
+
+    @Override
+    public void writeData(final ObjectDataOutput out) throws IOException {
+        out.writeLong(timestamp);
+        out.writeDouble(value);
+    }
+
+    @Override
+    public void readData(final ObjectDataInput in) throws IOException {
+        timestamp = in.readLong();
+        value = in.readDouble();
     }
 }

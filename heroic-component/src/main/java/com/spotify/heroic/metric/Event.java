@@ -26,18 +26,27 @@ import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Ordering;
 import com.google.common.hash.Hasher;
+import com.hazelcast.nio.ObjectDataInput;
+import com.hazelcast.nio.ObjectDataOutput;
+import com.hazelcast.nio.serialization.DataSerializable;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
 
-import java.util.Map;
-
+@NoArgsConstructor
 @Data
 @EqualsAndHashCode
-public class Event implements Metric {
+public class Event implements Metric, DataSerializable {
     private static final Map<String, String> EMPTY_PAYLOAD = ImmutableMap.of();
 
-    private final long timestamp;
-    private final Map<String, String> payload;
+    @NonNull
+    private long timestamp;
+    @NonNull
+    private Map<String, String> payload;
 
     public Event(final long timestamp) {
         this(timestamp, EMPTY_PAYLOAD);
@@ -60,6 +69,29 @@ public class Event implements Metric {
 
         for (final String k : KEY_ORDER.sortedCopy(payload.keySet())) {
             hasher.putString(k, Charsets.UTF_8).putString(payload.get(k), Charsets.UTF_8);
+        }
+    }
+
+    @Override
+    public void writeData(final ObjectDataOutput out) throws IOException {
+        out.writeLong(timestamp);
+
+        out.writeLong(payload.keySet().size());
+        for (final String k : KEY_ORDER.sortedCopy(payload.keySet())) {
+            out.writeUTF(k);
+            out.writeUTF(payload.get(k));
+        }
+    }
+
+    @Override
+    public void readData(final ObjectDataInput in) throws IOException {
+        timestamp = in.readLong();
+        payload = new HashMap<>();
+        long numKeys = in.readLong();
+        for (int count = 0; count < numKeys; count++) {
+            String key = in.readUTF();
+            String value = in.readUTF();
+            payload.put(key, value);
         }
     }
 }

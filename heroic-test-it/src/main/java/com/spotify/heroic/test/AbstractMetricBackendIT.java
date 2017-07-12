@@ -346,11 +346,11 @@ public abstract class AbstractMetricBackendIT {
         Points points = Data.points();
 
         long timestamp = 1;
-        long maxTimestamp = 1000000000000L;
+        long maxTimestamp = 86400L * 1000 * 4;
         // timestamps [1, maxTimestamp] since we can't fetch 0 (range start is exclusive)
         while (timestamp < maxTimestamp) {
             points.p(timestamp, random.nextDouble());
-            timestamp += Math.abs(random.nextInt(100000000));
+            timestamp += Math.abs(random.nextInt((int) (maxTimestamp / 10000) + 1));
         }
         points.p(maxTimestamp, random.nextDouble());
 
@@ -361,8 +361,11 @@ public abstract class AbstractMetricBackendIT {
             new FetchData.Request(MetricType.POINT, s3, new DateRange(0, maxTimestamp),
                 QueryOptions.builder().build());
 
-        assertEqualMetrics(mc, fetchMetrics(request, true));
-        assertEqualMetrics(mc, fetchMetrics(request, false));
+        List<MetricCollection> fetched = fetchMetrics(request, true);
+        System.out.println("fetched " + fetched.stream().map(MetricCollection::size).mapToInt(Integer::intValue).sum() + " metrics");
+        assertEqualMetrics(mc, fetched);
+        fetched = fetchMetrics(request, false);
+        assertEqualMetrics(mc, fetched);
     }
 
     private List<MetricCollection> fetchMetrics(FetchData.Request request, boolean slicedFetch)

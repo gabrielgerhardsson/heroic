@@ -28,27 +28,18 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.MultiMap;
 import com.spotify.heroic.common.DynamicModuleId;
 import com.spotify.heroic.common.Groups;
 import com.spotify.heroic.common.ModuleId;
 import com.spotify.heroic.dagger.PrimaryComponent;
 import com.spotify.heroic.metric.Metric;
 import com.spotify.heroic.metric.MetricModule;
-import com.sun.tools.javac.util.Pair;
 import dagger.Component;
 import dagger.Module;
 import dagger.Provides;
 import eu.toolchain.async.AsyncFramework;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 import javax.inject.Named;
 import lombok.Data;
 
@@ -71,7 +62,7 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
         this.id = id;
         this.groups = groups.orElseGet(Groups::empty).or(DEFAULT_GROUP);
         this.synchronizedStorage = synchronizedStorage.orElse(false);
-        this.servers = servers.orElse(ImmutableList.of());
+        this.servers = servers.orElse(ImmutableList.of("localhost:5701"));
     }
 
     @Override
@@ -101,22 +92,29 @@ public final class MemoryMetricModule implements MetricModule, DynamicModuleId {
 
         @Provides
         @MemoryScope
-        @Named("storage")
-        public MultiMap<MemoryBackend.MemoryKey, Pair<Long, Metric>> metricBackend(
+        @Named("storageTimeIndex")
+        public AsyncMultimap<MemoryBackend.MemoryKey, Long> storageTimeIndex(
             final AsyncFramework async
         ) {
             if (servers.size() > 0) {
                 HazelcastInstance instance = Hazelcast.getClientInstance(servers);
-                return instance.getMultiMap("metrics");
+                return new AsyncMultimap<>(
+                    new HazelcastMultimap<>(instance.getMultiMap("timeIndex")), async);
             }
-            throw new RuntimeException("Not implemented");
-            /*
-            if (synchronizedStorage) {
-                return new ConcurrentHashMap<>();
-            }
+            return new AsyncMultimap<>(new LocalMultimap<>(), async);
+        }
 
-            return new ConcurrentSkipListMap<>(MemoryBackend.COMPARATOR);
-            */
+        @Provides
+        @MemoryScope
+        @Named("storageMetrics")
+        public AsyncMultimap<Long, Metric> storageMetrics(
+            final AsyncFramework async
+        ) {
+            if (servers.size() > 0) {
+                HazelcastInstance instance = Hazelcast.getClientInstance(servers);
+                return new AsyncMultimap<>(new HazelcastMultimap<>(instance.getMultiMap("metrics")), async);
+            }
+            return new AsyncMultimap<>(new LocalMultimap<>(), async);
         }
 
         @Provides

@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.hash.Hasher;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.SortedSet;
 import java.util.function.BiConsumer;
@@ -35,7 +36,7 @@ import lombok.Data;
 public class ObjectHasher {
     private enum Kind {
         START_OBJECT, END_OBJECT, LIST, SET, FIELD, INTEGER, LONG, DOUBLE, STRING, BOOLEAN, ENUM,
-        OPTIONAL_PRESENT, OPTIONAL_ABSENT
+        OPTIONAL_PRESENT, OPTIONAL_ABSENT, MAP
     }
 
     private final Hasher hasher;
@@ -133,6 +134,20 @@ public class ObjectHasher {
 
             for (final T value : values) {
                 inner.accept(value);
+            }
+        };
+    }
+
+    public <K, V> Consumer<Map<K, V>> map(
+        final Consumer<K> innerKey, final Consumer<V> innerValue
+    ) {
+        return map -> {
+            putKind(Kind.MAP);
+            hasher.putInt(map.size());
+
+            for (final Map.Entry<K, V> entry : map.entrySet()) {
+                innerKey.accept(entry.getKey());
+                innerValue.accept(entry.getValue());
             }
         };
     }

@@ -31,8 +31,16 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
+import com.hazelcast.nio.ObjectDataInput;
+import com.hazelcast.nio.ObjectDataOutput;
+import com.hazelcast.nio.serialization.DataSerializable;
+import com.spotify.heroic.ObjectHasher;
 import com.spotify.heroic.grammar.DSL;
 import eu.toolchain.serializer.AutoSerialize;
+import java.io.IOException;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 
 import java.util.Iterator;
@@ -43,19 +51,22 @@ import java.util.TreeMap;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+@NoArgsConstructor
 @AutoSerialize
 @ToString(of = {"key", "tags"})
-public class Series implements Comparable<Series> {
+public class Series implements Comparable<Series>, DataSerializable {
     static final HashFunction HASH_FUNCTION = Hashing.murmur3_128();
 
     static final SortedMap<String, String> EMPTY_TAGS = ImmutableSortedMap.<String, String>of();
     static final String EMPTY_STRING = "";
 
-    final String key;
-    final SortedMap<String, String> tags;
+    @NonNull
+    String key;
+    @NonNull
+    SortedMap<String, String> tags;
 
     @AutoSerialize.Ignore
-    final HashCode hashCode;
+    HashCode hashCode = null;
 
     /**
      * Package-private constructor to avoid invalid inputs.
@@ -76,6 +87,36 @@ public class Series implements Comparable<Series> {
 
     public SortedMap<String, String> getTags() {
         return tags;
+    }
+
+    @Override
+    public void writeData(final ObjectDataOutput out) throws IOException {
+        out.writeUTF(key);
+        out.writeLong(tags.keySet().size());
+        for (final Map.Entry<String, String> e : tags.entrySet()) {
+            out.writeUTF(e.getKey());
+            out.writeUTF(e.getValue());
+        }
+    }
+
+    @Override
+    public void readData(final ObjectDataInput in) throws IOException {
+        key = in.readUTF();
+        tags = new TreeMap<String, String>();
+        long numKeys = in.readLong();
+        for (int count = 0; count < numKeys; count++) {
+            String key = in.readUTF();
+            String value = in.readUTF();
+            tags.put(key, value);
+        }
+        hashCode = generateHash();
+    }
+
+    public void hashTo(final ObjectHasher hasher) {
+        hasher.putObject(getClass(), () -> {
+            hasher.putField("key", key, hasher.string());
+            hasher.putField("tags", tags, hasher.map(hasher.string(), hasher.string()));
+        });
     }
 
     @JsonIgnore
