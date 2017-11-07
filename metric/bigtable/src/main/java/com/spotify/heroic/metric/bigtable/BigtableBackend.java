@@ -25,6 +25,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.cloud.bigtable.grpc.scanner.FlatRow;
+import com.google.cloud.bigtable.util.RowKeyUtil;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -56,6 +57,7 @@ import com.spotify.heroic.metric.bigtable.api.Mutations;
 import com.spotify.heroic.metric.bigtable.api.ReadRowRangeRequest;
 import com.spotify.heroic.metric.bigtable.api.ReadRowsRequest;
 import com.spotify.heroic.metric.bigtable.api.RowFilter;
+import com.spotify.heroic.metric.bigtable.api.RowRange;
 import com.spotify.heroic.metric.bigtable.api.Table;
 import com.spotify.heroic.metrics.Meter;
 import com.spotify.heroic.statistics.MetricBackendReporter;
@@ -74,6 +76,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import javax.inject.Inject;
@@ -406,9 +409,16 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
         final List<AsyncFuture<FetchData>> fetches = new ArrayList<>(prepared.size());
 
         for (final PreparedQuery p : prepared) {
+            final ByteString rowKey = p.request.getRowKey();
+            final ByteString truncatedKey = rowKey.substring(0, rowKey.size() - 2);
+            final ByteString endKey = ByteString.copyFrom(RowKeyUtil.calculateTheClosestNextRowKeyForPrefix(truncatedKey.toByteArray()));
+            log.info("Non-streaming: Truncated row key from " + rowKey.size() + " bytes to " + truncatedKey.size() + ", (ends with '"
+                + bytesToHex(getLastBytes(rowKey, NUM_PRINT_BYTES)) + "' vs '" +  bytesToHex(getLastBytes(truncatedKey, NUM_PRINT_BYTES)));
+
             final AsyncFuture<List<FlatRow>> readRows = client.readRows(table, ReadRowsRequest
                 .builder()
-                .rowKey(p.request.getRowKey())
+                //.rowKey(p.request.getRowKey())
+                .range(new RowRange(Optional.of(truncatedKey), Optional.of(endKey)))
                 .filter(RowFilter.chain(Arrays.asList(RowFilter
                     .newColumnRangeBuilder(p.request.getColumnFamily())
                     .startQualifierOpen(p.request.getStartQualifierOpen())
@@ -425,6 +435,7 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
                 final List<Iterable<Metric>> points = new ArrayList<>();
 
                 for (final FlatRow row : result) {
+                    log.info("Did read FlatRow with rowKey that ends with '" +  bytesToHex(getLastBytes(row.getRowKey(), NUM_PRINT_BYTES)) + "'");
                     watcher.readData(row.getCells().size());
                     points.add(Iterables.transform(row.getCells(), transform));
                 }
@@ -446,6 +457,24 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
         });
     }
 
+    private final static int NUM_PRINT_BYTES = 16;
+    private final static char[] HEX_LOOKUP = "0123456789ABCDEF".toCharArray();
+
+    private String bytesToHex(ByteString bs) {
+        byte[] bytes = bs.toByteArray();
+        char[] out = new char[bytes.length * 2];
+        for ( int i = 0; i < bytes.length; i++ ) {
+            final int v = bytes[i] & 0xFF;
+            out[i * 2] = HEX_LOOKUP[v >>> 4];
+            out[i * 2 + 1] = HEX_LOOKUP[v & 0x0F];
+        }
+        return new String(out);
+    }
+
+    private ByteString getLastBytes(final ByteString in, final int lastNumBytes) {
+        return in.substring(Math.max(in.size() - lastNumBytes - 1, 0));
+    }
+
     private AsyncFuture<FetchData.Result> fetchBatch(
         final FetchQuotaWatcher watcher, final MetricType type, final List<PreparedQuery> prepared,
         final BigtableConnection c, final Consumer<MetricCollection> metricsConsumer
@@ -457,9 +486,17 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
         for (final PreparedQuery p : prepared) {
             QueryTrace.NamedWatch fs = QueryTrace.watch(FETCH_SEGMENT);
 
+            final ByteString rowKey = p.request.getRowKey();
+            final ByteString truncatedKey = rowKey.substring(0, rowKey.size() - 6);
+            final ByteString endKey = ByteString.copyFrom(RowKeyUtil.calculateTheClosestNextRowKeyForPrefix(truncatedKey.toByteArray()));
+            log.info("Streaming: Truncated row key from " + rowKey.size() + " bytes to " + truncatedKey.size() + ", (ends with '"
+                + bytesToHex(getLastBytes(rowKey, NUM_PRINT_BYTES)) + "' vs '"
+                +  bytesToHex(getLastBytes(truncatedKey, NUM_PRINT_BYTES)) + "' & '" + bytesToHex(getLastBytes(endKey, NUM_PRINT_BYTES)) + "'");
+
             final AsyncFuture<List<FlatRow>> readRows = client.readRows(table, ReadRowsRequest
                 .builder()
-                .rowKey(p.request.getRowKey())
+                //.rowKey(p.request.getRowKey())
+                .range(new RowRange(Optional.of(truncatedKey), Optional.of(endKey)))
                 .filter(RowFilter.chain(Arrays.asList(RowFilter
                     .newColumnRangeBuilder(p.request.getColumnFamily())
                     .startQualifierOpen(p.request.getStartQualifierOpen())
@@ -472,6 +509,7 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
 
             fetches.add(readRows.directTransform(result -> {
                 for (final FlatRow row : result) {
+                    log.info("Did read FlatRow with rowKey that ends with '" +  bytesToHex(getLastBytes(row.getRowKey(), NUM_PRINT_BYTES)) + "'");
                     watcher.readData(row.getCells().size());
                     final List<Metric> metrics = Lists.transform(row.getCells(), transform);
                     metricsConsumer.accept(MetricCollection.build(type, metrics));
@@ -518,6 +556,7 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
 
             final RowKey key = new RowKey(series, base);
             final ByteString keyBlob = serialize(key, rowKeySerializer);
+
             final ByteString startKey = serializeOffset(offset(modified.start()));
             final ByteString endKey = serializeOffset(offset(modified.end()));
 
