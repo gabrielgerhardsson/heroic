@@ -71,6 +71,7 @@ import eu.toolchain.serializer.Serializer;
 import eu.toolchain.serializer.SerializerFramework;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -410,10 +411,12 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
 
         for (final PreparedQuery p : prepared) {
             final ByteString rowKey = p.request.getRowKey();
-            final ByteString truncatedKey = rowKey.substring(0, rowKey.size() - 2);
+            final ByteString truncatedKey = rowKey.substring(0, rowKey.size() - 6);
             final ByteString endKey = ByteString.copyFrom(RowKeyUtil.calculateTheClosestNextRowKeyForPrefix(truncatedKey.toByteArray()));
             log.info("Non-streaming: Truncated row key from " + rowKey.size() + " bytes to " + truncatedKey.size() + ", (ends with '"
-                + bytesToHex(getLastBytes(rowKey, NUM_PRINT_BYTES)) + "' vs '" +  bytesToHex(getLastBytes(truncatedKey, NUM_PRINT_BYTES)));
+                + bytesToHex(getLastBytes(rowKey, NUM_PRINT_BYTES)) + "' vs '"
+                +  bytesToHex(getLastBytes(truncatedKey, NUM_PRINT_BYTES)) + "' & '" + bytesToHex(getLastBytes(endKey, NUM_PRINT_BYTES)) + "'");
+
 
             final AsyncFuture<List<FlatRow>> readRows = client.readRows(table, ReadRowsRequest
                 .builder()
@@ -457,24 +460,6 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
         });
     }
 
-    private final static int NUM_PRINT_BYTES = 16;
-    private final static char[] HEX_LOOKUP = "0123456789ABCDEF".toCharArray();
-
-    private String bytesToHex(ByteString bs) {
-        byte[] bytes = bs.toByteArray();
-        char[] out = new char[bytes.length * 2];
-        for ( int i = 0; i < bytes.length; i++ ) {
-            final int v = bytes[i] & 0xFF;
-            out[i * 2] = HEX_LOOKUP[v >>> 4];
-            out[i * 2 + 1] = HEX_LOOKUP[v & 0x0F];
-        }
-        return new String(out);
-    }
-
-    private ByteString getLastBytes(final ByteString in, final int lastNumBytes) {
-        return in.substring(Math.max(in.size() - lastNumBytes - 1, 0));
-    }
-
     private AsyncFuture<FetchData.Result> fetchBatch(
         final FetchQuotaWatcher watcher, final MetricType type, final List<PreparedQuery> prepared,
         final BigtableConnection c, final Consumer<MetricCollection> metricsConsumer
@@ -493,11 +478,14 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
                 + bytesToHex(getLastBytes(rowKey, NUM_PRINT_BYTES)) + "' vs '"
                 +  bytesToHex(getLastBytes(truncatedKey, NUM_PRINT_BYTES)) + "' & '" + bytesToHex(getLastBytes(endKey, NUM_PRINT_BYTES)) + "'");
 
+            final ByteString rowKeyRegex = hexEscapeForRegex(rowKey);
+
             final AsyncFuture<List<FlatRow>> readRows = client.readRows(table, ReadRowsRequest
                 .builder()
                 //.rowKey(p.request.getRowKey())
                 .range(new RowRange(Optional.of(truncatedKey), Optional.of(endKey)))
-                .filter(RowFilter.chain(Arrays.asList(RowFilter
+                .filter(RowFilter.chain(Arrays.asList(new RowFilter.RowKeyRegexFilter(rowKeyRegex),
+                    RowFilter
                     .newColumnRangeBuilder(p.request.getColumnFamily())
                     .startQualifierOpen(p.request.getStartQualifierOpen())
                     .endQualifierClosed(p.request.getEndQualifierClosed())
@@ -521,6 +509,39 @@ public class BigtableBackend extends AbstractMetricBackend implements LifeCycles
             watcher.accessedRows(prepared.size());
             return result;
         });
+    }
+
+    private final static int NUM_PRINT_BYTES = 16;
+    private final static char[] HEX_LOOKUP = "0123456789ABCDEF".toCharArray();
+
+    private String bytesToHex(ByteString bs) {
+        byte[] bytes = bs.toByteArray();
+        char[] out = new char[bytes.length * 2];
+        for ( int i = 0; i < bytes.length; i++ ) {
+            final int v = bytes[i] & 0xFF;
+            out[i * 2] = HEX_LOOKUP[v >>> 4];
+            out[i * 2 + 1] = HEX_LOOKUP[v & 0x0F];
+        }
+        return new String(out);
+    }
+
+    private ByteString hexEscapeForRegex(ByteString in) {
+        final String hex = bytesToHex(in);
+        byte[] hexBytes = hex.getBytes(StandardCharsets.UTF_8);
+        final int numCharacters = hex.length() / 2;
+        final StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < numCharacters; i++) {
+            builder.append("\\x");
+            builder.append((char)hexBytes[i * 2]);
+            builder.append((char)hexBytes[i * 2 + 1]);
+        }
+        final String out = builder.toString();
+        //log.info(out);
+        return ByteString.copyFrom(out, StandardCharsets.UTF_8);
+    }
+
+    private ByteString getLastBytes(final ByteString in, final int lastNumBytes) {
+        return in.substring(Math.max(in.size() - lastNumBytes - 1, 0));
     }
 
     <T> ByteString serialize(T rowKey, Serializer<T> serializer) throws IOException {

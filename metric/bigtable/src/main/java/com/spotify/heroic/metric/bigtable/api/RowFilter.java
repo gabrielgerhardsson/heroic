@@ -24,6 +24,7 @@ package com.spotify.heroic.metric.bigtable.api;
 import com.google.protobuf.ByteString;
 import java.util.List;
 import java.util.Optional;
+import java.util.Random;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -236,6 +237,29 @@ public interface RowFilter {
         @Override
         public com.google.bigtable.v2.RowFilter toPb() {
             return com.google.bigtable.v2.RowFilter.newBuilder().setBlockAllFilter(true).build();
+        }
+    }
+
+    @Data
+    class RowKeyRegexFilter implements RowFilter {
+        private final ByteString rowKeyRegex;
+
+        @Override
+        public boolean matchesColumn(final ByteString columnQualifier) {
+            return true;
+        }
+
+        @Override
+        public boolean matchesColumnFamily(final String familyName) {
+            return true;
+        }
+
+        @Override
+        public com.google.bigtable.v2.RowFilter toPb() {
+            return com.google.bigtable.v2.RowFilter
+                .newBuilder()
+                .setRowKeyRegexFilter(rowKeyRegex)
+                .build();
         }
     }
 
