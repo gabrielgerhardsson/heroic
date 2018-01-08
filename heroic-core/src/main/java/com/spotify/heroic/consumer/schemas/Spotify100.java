@@ -73,6 +73,8 @@ public class Spotify100 implements ConsumerSchema {
         private final Long time;
         @JsonDeserialize(using = TagsDeserializer.class)
         private final Map<String, String> attributes;
+        @JsonDeserialize(using = ResourceDeserializer.class)
+        private final Map<String, String> resource;
         private final Double value;
 
         @JsonCreator
@@ -80,6 +82,7 @@ public class Spotify100 implements ConsumerSchema {
             @JsonProperty("version") String version, @JsonProperty("key") String key,
             @JsonProperty("host") String host, @JsonProperty("time") Long time,
             @JsonProperty("attributes") Map<String, String> attributes,
+            @JsonProperty("resource") Map<String, String> resource,
             @JsonProperty("value") Double value
         ) {
             this.version = version;
@@ -87,6 +90,7 @@ public class Spotify100 implements ConsumerSchema {
             this.host = host;
             this.time = time;
             this.attributes = attributes;
+            this.resource = resource;
             this.value = value;
         }
 
@@ -95,6 +99,40 @@ public class Spotify100 implements ConsumerSchema {
             public Map<String, String> deserialize(JsonParser p, DeserializationContext ctxt)
                 throws IOException, JsonProcessingException {
                 final ImmutableMap.Builder<String, String> tags = ImmutableMap.builder();
+
+                if (p.getCurrentToken() != JsonToken.START_OBJECT) {
+                    throw ctxt.wrongTokenException(p, JsonToken.START_OBJECT, null);
+                }
+
+                while (p.nextToken() == JsonToken.FIELD_NAME) {
+                    final String key = p.getCurrentName();
+                    final String value = p.nextTextValue();
+
+                    if (value == null) {
+                        continue;
+                    }
+
+                    tags.put(key, value);
+                }
+
+                if (p.getCurrentToken() != JsonToken.END_OBJECT) {
+                    throw ctxt.wrongTokenException(p, JsonToken.END_OBJECT, null);
+                }
+
+                return tags.build();
+            }
+        }
+
+        public static final class ResourceDeserializer extends JsonDeserializer<Map<String, String>> {
+            @Override
+            public Map<String, String> deserialize(JsonParser p, DeserializationContext ctxt)
+                throws IOException, JsonProcessingException {
+                final ImmutableMap.Builder<String, String> tags = ImmutableMap.builder();
+
+                if (p.getCurrentToken() == JsonToken.VALUE_NULL) {
+                    p.nextToken();
+                    return tags.build();
+                }
 
                 if (p.getCurrentToken() != JsonToken.START_OBJECT) {
                     throw ctxt.wrongTokenException(p, JsonToken.START_OBJECT, null);
